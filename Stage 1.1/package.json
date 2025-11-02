@@ -1,0 +1,14 @@
+{
+  "name": "file-based-e-commerce",
+  "version": "1.0.0",
+  "description": "FIle Based E commerce with CURD operation",
+  "license": "ISC",
+  "author": "Vengadesan G",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start" : "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+
+  }
+}
