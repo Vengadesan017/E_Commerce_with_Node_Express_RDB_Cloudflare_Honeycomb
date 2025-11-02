@@ -1,0 +1,22 @@
+name = "ecommerce-worker"
+main = "index.js"
+compatibility_date = "2025-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+
+[[d1_databases]]
+binding = "DB"        # matches env.DB in code
+database_name = "mydb"
+database_id = "08f734ed-4d65-4044-96f9-4abcd49510c3"
+
+[[r2_buckets]]
+binding = "mylogs" # matches env.LOG_BUCKET in code
+bucket_name = "mylogs"
+
+[vars]
+
+HONEYCOMB_DATASET = "ecommerce-worker"
+
+
+
+
