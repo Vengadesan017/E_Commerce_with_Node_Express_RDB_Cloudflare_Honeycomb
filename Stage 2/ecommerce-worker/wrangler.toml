@@ -1,0 +1,17 @@
+name = "ecommerce-worker"
+main = "index.js"
+compatibility_date = "2025-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mydb"
+database_id = "08f734ed-4d65-4044-96f9-4abcd49510c3"
+
+[[r2_buckets]]
+binding = "mylogs"
+bucket_name = "mylogs"
+
+[vars]
+HONEYCOMB_API_KEY = "ez6LjMt0FhExsuRdUpjT6D"
+HONEYCOMB_DATASET = "ecommerce-worker"
