@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRUD E-commerce</title>
+<style>
+  /* --- Reset & Base --- */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Poppins', sans-serif; background: linear-gradient(90deg, #4f46e5, #3b82f6);; color: #333; }
+  h1 { text-align: center; margin-bottom: 20px; color: #ffffff; }
+   h3 { text-align: center; margin-bottom: 20px; color: #1f2937; }
+
+  .container { max-width: 1000px; margin: 40px auto; padding: 20px; }
+
+  /* --- Card Style Form --- */
+  .card { background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); padding: 25px; margin-bottom: 30px; }
+  form { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }
+  form input, form button { padding: 12px 15px; border-radius: 8px; border: 1px solid #ccc; font-size: 16px; }
+  form input { flex: 1 1 28%; }
+  form button { flex: 1 1 20%; border: none; cursor: pointer; font-weight: bold; transition: all 0.3s ease; }
+  form button.save { background: #22c55e; color: #fff; }
+  form button.save:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+  form button.cancel { background: #ef4444; color: #fff; display: none; }
+  form button.cancel:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+
+  /* --- Message --- */
+  .message { margin-top: 15px; text-align: center; font-weight: bold; padding: 10px; border-radius: 6px; color: #991b1b;}
+  .message.success { background: #d1fae5; color: #065f46; }
+  .message.error { background: #fee2e2; color: #991b1b; }
+
+  /* --- Table --- */
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+  th, td { padding: 15px 20px; text-align: left; }
+  thead { background: linear-gradient(90deg,#4f46e5,#3b82f6); color: #fff; font-weight: 600; }
+  tr:nth-child(even) { background: #f9fafb; }
+  tr:hover { background: #f3f4f6; color: #000;}
+
+  /* --- Action Buttons --- */
+  .btn { padding: 8px 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.3s ease; }
+  .btn.edit { background: #facc15; color: #1f2937; }
+  .btn.edit:hover { transform: translateY(-2px); }
+  .btn.delete { background: #ef4444; color: #fff; }
+  .btn.delete:hover { transform: translateY(-2px); }
+
+  /* --- Responsive --- */
+  @media(max-width: 768px){
+    form { flex-direction: column; }
+    form input, form button { flex: 1 1 100%; }
+  }
+
+  /* --- Edit & Delete Buttons --- */
+.btn {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: none;
+  font-size: 14px;
+}
+
+.btn.save {
+  background: #22c55e; /* green */
+  color: #fff;
+}
+
+.btn.save:hover {
+  background: #16a34a; /* darker green */
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+}
+
+/* Edit button */
+.btn.edit {
+  background: #facc15; /* bright yellow */
+  color: #1f2937;      /* dark text for contrast */
+}
+
+.btn.edit:hover {
+  background: #eab308; /* slightly darker yellow */
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+}
+
+/* Delete button */
+.btn.delete {
+  background: #ef4444; /* red */
+  color: #fff;
+}
+
+.btn.delete:hover {
+  background: #dc2626; /* darker red */
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+}
+
+</style>
+</head>
+<body>
+
+<div class="container">
+    <h1>CRUD Based E-commerce Using Node By Vengadesan</h1>
+  <div class="card">
+    <h3 id="form-title">Add Product</h3>
+    <form id="product-form">
+      <input type="hidden" id="product-id">
+      <input type="text" id="name" placeholder="Product Name" required>
+      <input type="number" step="0.01" id="price" placeholder="Price" required>
+      <input type="number" id="stock" placeholder="Stock" required>
+      <button type="submit" class="save">Save</button>
+      <button type="button" id="cancel-update" class="cancel">Cancel</button>
+    </form>
+    <div id="message" class="message"></div>
+  </div>
+
+  <div class="card">
+    <h3>All Products</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Price</th>
+          <th>Stock</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="products-table-body"></tbody>
+    </table>
+  </div>
+</div>
+<script>
+const API_URL = "http://localhost:4000/products"; // Change if needed
+
+const form = document.getElementById('product-form');
+const tableBody = document.getElementById('products-table-body');
+const messageDiv = document.getElementById('message');
+const formTitle = document.getElementById('form-title');
+const cancelUpdateBtn = document.getElementById('cancel-update');
+
+let editingId = null;
+
+// --- Fetch and render all products ---
+async function fetchProducts() {
+  try {
+    const res = await fetch(API_URL);
+    const products = await res.json();
+    tableBody.innerHTML = '';
+    products.forEach(p => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${p.id}</td>
+        <td>${p.name}</td>
+        <td>${p.price}</td>
+        <td>${p.stock}</td>
+        <td>
+          <button onclick="editProduct(${p.id}, '${p.name}', ${p.price}, ${p.stock})" class="btn edit">Edit</button>
+          <button onclick="deleteProduct(${p.id})" class="btn delete">Delete</button>
+        </td>
+      `;
+      tableBody.appendChild(row);
+    });
+  } catch (err) {
+    console.error(err);
+    messageDiv.textContent = "Error fetching products.";
+  }
+}
+
+// --- Add or update product ---
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('name').value.trim();
+  const price = parseFloat(document.getElementById('price').value);
+  const stock = parseInt(document.getElementById('stock').value);
+
+  try {
+    let res;
+    if (editingId) {
+      res = await fetch(`${API_URL}/${editingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, price, stock })
+      });
+    } else {
+      res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, price, stock })
+      });
+    }
+
+    const data = await res.json();
+    if (!res.ok) {
+      messageDiv.textContent = data.error || "Operation failed.";
+    } else {
+      messageDiv.textContent = '';
+      form.reset();
+      editingId = null;
+      formTitle.textContent = 'Add Product';
+      cancelUpdateBtn.style.display = 'none';
+      fetchProducts();
+    }
+  } catch (err) {
+    console.error(err);
+    messageDiv.textContent = "Error saving product.";
+  }
+});
+
+// --- Edit product ---
+function editProduct(id, name, price, stock) {
+  editingId = id;
+  formTitle.textContent = 'Update Product';
+  document.getElementById('name').value = name;
+  document.getElementById('price').value = price;
+  document.getElementById('stock').value = stock;
+  cancelUpdateBtn.style.display = 'inline';
+}
+
+// --- Cancel update ---
+cancelUpdateBtn.addEventListener('click', () => {
+  editingId = null;
+  form.reset();
+  formTitle.textContent = 'Add Product';
+  cancelUpdateBtn.style.display = 'none';
+});
+
+// --- Delete product ---
+async function deleteProduct(id) {
+  if (!confirm("Are you sure you want to delete this product?")) return;
+  try {
+    const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) {
+      messageDiv.textContent = data.error || "Delete failed.";
+    } else {
+      fetchProducts();
+    }
+  } catch (err) {
+    console.error(err);
+    messageDiv.textContent = "Error deleting product.";
+  }
+}
+
+// Initial fetch
+fetchProducts();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "e-commer-stage-1-2",
+  "version": "1.0.0",
+  "description": "Express.js and Sqlit Based E-commerce",
+  "license": "ISC",
+  "author": "Vengadesan G",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "joi": "^18.0.1",
+    "morgan": "^1.10.1",
+    "pg": "^8.16.3",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "winston": "^3.18.3"
+  }
+}
