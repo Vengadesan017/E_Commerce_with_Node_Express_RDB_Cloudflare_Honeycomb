@@ -1,4 +1,5 @@
 # 🛒 E-Commerce Worker Project
+[[https://vengadesan017.github.io/E_Commerce_with_Node_Express_RDB_Cloudflare_Honeycomb/]]
 
 A Cloudflare Worker-based e-commerce API that evolves in multiple stages to demonstrate Node.js fundamentals, Express.js CRUD operations, Cloudflare serverless computing, and observability integration with Honeycomb.
 

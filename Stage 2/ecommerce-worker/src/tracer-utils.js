@@ -18,3 +18,14 @@ export async function runWithSpan(env, traceId, name, parentSpanId, fn, attribut
     throw err
   }
 }
+
+export function addLog(span, message, level = "info", extra = {}) {
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    ...extra,
+  };
+  span.logs.push(logEntry);
+  console.log(`[${level.toUpperCase()}] ${message}`, extra);
+}

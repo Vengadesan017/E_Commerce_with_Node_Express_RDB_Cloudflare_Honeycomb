@@ -7,6 +7,7 @@ export function makeSpan(traceId, name, attributes = {}, parentId = null) {
     span_id: crypto.randomUUID().replace(/-/g, "").slice(0, 16), // unique span id
     parent_id: parentId,
     attributes: { ...attributes },
+    logs: [],
   };
 }
 
@@ -23,6 +24,7 @@ export async function sendSpanToHoneycomb(env, span) {
       ...(span.parent_id ? { "trace.parent_id": span.parent_id } : {}),
       "name": span.name,
       ...span.attributes,
+       logs: span.logs?.length ? JSON.stringify(span.logs) : undefined,
       
     },
   };
