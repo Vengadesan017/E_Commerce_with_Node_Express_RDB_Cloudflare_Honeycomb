@@ -42,6 +42,7 @@ import { Router } from 'itty-router'
 import Joi from 'joi'
 import { Logger } from './logger.js'
 import { makeSpan, sendSpanToHoneycomb } from './tracer.js'
+import { runWithSpan } from './tracer-utils.js'
 
 const router = Router()
 
@@ -73,202 +74,197 @@ function newTraceId() {
 }
 
 /* -------------------------- Products API -------------------------- */
-
 // GET all products
 router.get('/products', async (req, env) => {
   const traceId = newTraceId()
-  const logger = new Logger(env, traceId)
-  const span = makeSpan(traceId, 'GET /products', { endpoint: '/products' })
-
+  const root = makeSpan(traceId, 'GET /products')
+  const start = Date.now()
   try {
-    const { results } = await env.mydb.prepare('SELECT * FROM products ORDER BY id ASC').all()
-    await logger.debug('Fetched products', { count: results.length })
-	span.attributes = span.attributes || {};
-    span.attributes.status = 'success'
-    await sendSpanToHoneycomb(env, span)
+    const results = await runWithSpan(env, traceId, 'db_query_products', root.span_id, async () => {
+      const { results } = await env.mydb.prepare('SELECT * FROM products ORDER BY id ASC').all()
+      return results
+    })
+    root.attributes.status = 'success'
+    root.attributes.duration_ms = Date.now() - start
+    await sendSpanToHoneycomb(env, root)
     return Response.json(results)
   } catch (err) {
-    span.attributes = span.attributes || {}
-    span.attributes.status = 'error'
-    span.attributes.error = err?.message
-    await sendSpanToHoneycomb(env, span)
-
-    await logger.error('Error fetching products', { error: err?.message })
-    return new Response('Internal server error: ' + (err?.message || err), { status: 500 })
+    root.attributes.status = 'error'
+    root.attributes.error = err.message
+    await sendSpanToHoneycomb(env, root)
+    return new Response('Internal server error: ' + err.message, { status: 500 })
   }
 })
 
 // GET product by id
 router.get('/products/:id', async (req, env) => {
   const traceId = newTraceId()
-  const logger = new Logger(env, traceId)
-  const span = makeSpan(traceId, 'GET /products/:id', { endpoint: '/products/:id' })
+  const root = makeSpan(traceId, 'GET /products/:id')
+  const start = Date.now()
 
   try {
-    const id = Number(req.params.id)
-    const { results } = await env.mydb.prepare('SELECT * FROM products WHERE id = ?').bind(id).all()
-    if (!results || results.length === 0) {
-      await logger.debug('Product not found', { id })
-	  span.attributes = span.attributes || {};
-      span.attributes.status = 'not_found'
-      await sendSpanToHoneycomb(env, span)
+    const id = await runWithSpan(env, traceId, 'parse_path_params', root.span_id, async () => Number(req.params.id))
+
+    const product = await runWithSpan(env, traceId, 'db_query_product_by_id', root.span_id, async () => {
+      const { results } = await env.mydb.prepare('SELECT * FROM products WHERE id = ?').bind(id).all()
+      return results[0]
+    })
+
+    if (!product) {
+      root.attributes.status = 'not_found'
+      await sendSpanToHoneycomb(env, root)
       return Response.json({ error: 'Product not found' }, { status: 404 })
     }
-    await logger.debug('Fetched product', { id })
-	span.attributes = span.attributes || {};
-    span.attributes.status = 'success'
-    await sendSpanToHoneycomb(env, span)
-    return Response.json(results[0])
+
+    root.attributes.status = 'success'
+    root.attributes.duration_ms = Date.now() - start
+    await sendSpanToHoneycomb(env, root)
+    return Response.json(product)
   } catch (err) {
-    await logger.error('Error fetching product', { error: err?.message })
-    span.attributes = span.attributes || {}
-    span.attributes.status = 'error'
-    span.attributes.error = err?.message
-    await sendSpanToHoneycomb(env, span)
-    return new Response('Internal server error: ' + (err?.message || err), { status: 500 })
+    root.attributes.status = 'error'
+    root.attributes.error = err.message
+    await sendSpanToHoneycomb(env, root)
+    return new Response('Internal server error: ' + err.message, { status: 500 })
   }
 })
 
 // POST create product
 router.post('/products', async (req, env) => {
   const traceId = newTraceId()
-  const logger = new Logger(env, traceId)
-  const span = makeSpan(traceId, 'POST /products', { endpoint: '/products' })
+  const root = makeSpan(traceId, 'POST /products')
+  const start = Date.now()
 
-  const start = Date.now();
   try {
-    let body
-    try { body = await req.json() } catch (e) {
-      await logger.error('Invalid JSON body', { error: e?.message })
-      return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
-    }
+    const body = await runWithSpan(env, traceId, 'parse_request', root.span_id, async () => await req.json())
 
-    const { error, value } = productSchema.validate(body)
-    if (error) {
-      await logger.error('Validation failed', { error: error.details[0].message })
-      return Response.json({ error: error.details[0].message }, { status: 400 })
-    }
+    const valid = await runWithSpan(env, traceId, 'validate_input', root.span_id, async () => {
+      const { error, value } = productSchema.validate(body)
+      if (error) throw new Error(error.details[0].message)
+      return value
+    })
 
-    const { name, price, stock } = value
+    const insertedId = await runWithSpan(env, traceId, 'db_insert_product', root.span_id, async () => {
+      const stmt = await env.mydb
+        .prepare('INSERT INTO products (name, price, stock) VALUES (?, ?, ?)')
+        .bind(valid.name, valid.price, valid.stock)
+        .run()
+      return stmt?.meta?.last_row_id
+    })
 
-    const insertStmt = await env.mydb.prepare(
-      'INSERT INTO products (name, price, stock) VALUES (?, ?, ?)'
-    ).bind(name, price, stock).run()
+    const product = await runWithSpan(env, traceId, 'db_select_new_product', root.span_id, async () => {
+      const { results } = await env.mydb
+        .prepare('SELECT * FROM products WHERE id = ?')
+        .bind(insertedId)
+        .all()
+      return results[0]
+    })
 
-    const insertedId = insertStmt?.meta?.last_row_id
-    const { results } = await env.mydb.prepare('SELECT * FROM products WHERE id = ?').bind(insertedId).all()
+    await runWithSpan(env, traceId, 'r2_write_product_log', root.span_id, async () => {
+      await env.mylogs.put(`product-create-${insertedId}.json`, JSON.stringify(product, null, 2))
+    })
 
-    await logger.event('Product created', { id: insertedId, name })
-	const duration = Date.now() - start;
-	span.attributes.duration_ms = duration;
-	span.attributes = span.attributes || {};
-    span.attributes.status = 'success'
-    span.attributes.productId = insertedId
-    await sendSpanToHoneycomb(env, span)
-
-    // persist event log to R2 (already done in Logger but store a specific file)
-    try {
-      await env.mylogs.put(`product-create-${insertedId}.json`, JSON.stringify(results[0], null, 2))
-    } catch (e) {
-      // best-effort
-      console.error('R2 put failed for created product', e?.message)
-    }
-
-    return Response.json({ message: 'Product added', product: results[0] }, { status: 201 })
+    root.attributes.status = 'success'
+    root.attributes.duration_ms = Date.now() - start
+    await sendSpanToHoneycomb(env, root)
+    return Response.json({ message: 'Product added', product }, { status: 201 })
   } catch (err) {
-    await logger.error('Error creating product', { error: err?.message })
-	const duration = Date.now() - start;
-	span.attributes.duration_ms = duration;
-    span.attributes = span.attributes || {}
-    span.attributes.status = 'error'
-    span.attributes.error = err?.message
-    await sendSpanToHoneycomb(env, span)
-    return new Response('Internal server error: ' + (err?.message || err), { status: 500 })
+    root.attributes.status = 'error'
+    root.attributes.error = err.message
+    root.attributes.duration_ms = Date.now() - start
+    await sendSpanToHoneycomb(env, root)
+    return new Response('Internal server error: ' + err.message, { status: 500 })
   }
 })
 
 // PUT update product
 router.put('/products/:id', async (req, env) => {
   const traceId = newTraceId()
-  const logger = new Logger(env, traceId)
-  const span = makeSpan(traceId, 'PUT /products/:id', { endpoint: '/products/:id' })
+  const root = makeSpan(traceId, 'PUT /products/:id')
+  const start = Date.now()
 
   try {
     const id = Number(req.params.id)
-    let body
-    try { body = await req.json() } catch(e) {
-      await logger.error('Invalid JSON body', { error: e?.message })
-      return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
-    }
+    const body = await runWithSpan(env, traceId, 'parse_request', root.span_id, async () => await req.json())
 
-    const { error, value } = productSchema.validate(body)
-    if (error) {
-      await logger.error('Validation failed', { error: error.details[0].message })
-      return Response.json({ error: error.details[0].message }, { status: 400 })
-    }
+    const valid = await runWithSpan(env, traceId, 'validate_input', root.span_id, async () => {
+      const { error, value } = productSchema.validate(body)
+      if (error) throw new Error(error.details[0].message)
+      return value
+    })
 
-    const { name, price, stock } = value
-    const stmt = await env.mydb.prepare(
-      'UPDATE products SET name = ?, price = ?, stock = ? WHERE id = ?'
-    ).bind(name, price, stock, id).run()
+    const updateResult = await runWithSpan(env, traceId, 'db_update_product', root.span_id, async () => {
+      return await env.mydb
+        .prepare('UPDATE products SET name = ?, price = ?, stock = ? WHERE id = ?')
+        .bind(valid.name, valid.price, valid.stock, id)
+        .run()
+    })
 
-    if (!stmt || stmt.changes === 0) {
-      await logger.debug('Product not found for update', { id })
-	  span.attributes = span.attributes || {};
-      span.attributes.status = 'not_found'
-      await sendSpanToHoneycomb(env, span)
+    if (!updateResult || updateResult.changes === 0) {
+      root.attributes.status = 'not_found'
+      await sendSpanToHoneycomb(env, root)
       return Response.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    const { results } = await env.mydb.prepare('SELECT * FROM products WHERE id = ?').bind(id).all()
-    await env.mylogs.put(`product-update-${id}.json`, JSON.stringify(results[0], null, 2))
-    await logger.event('Product updated', { id })
-	span.attributes = span.attributes || {};
-    span.attributes.status = 'success'
-    await sendSpanToHoneycomb(env, span)
+    const product = await runWithSpan(env, traceId, 'db_fetch_updated_product', root.span_id, async () => {
+      const { results } = await env.mydb.prepare('SELECT * FROM products WHERE id = ?').bind(id).all()
+      return results[0]
+    })
 
-    return Response.json({ message: 'Product updated', product: results[0] })
+    await runWithSpan(env, traceId, 'r2_write_update_log', root.span_id, async () => {
+      await env.mylogs.put(`product-update-${id}.json`, JSON.stringify(product, null, 2))
+    })
+
+    root.attributes.status = 'success'
+    root.attributes.duration_ms = Date.now() - start
+    await sendSpanToHoneycomb(env, root)
+    return Response.json({ message: 'Product updated', product })
   } catch (err) {
-    await logger.error('Error updating product', { error: err?.message })
-    span.attributes = span.attributes || {}
-    span.attributes.status = 'error'
-    span.attributes.error = err?.message
-    await sendSpanToHoneycomb(env, span)
-    return new Response('Internal server error: ' + (err?.message || err), { status: 500 })
+    root.attributes.status = 'error'
+    root.attributes.error = err.message
+    root.attributes.duration_ms = Date.now() - start
+    await sendSpanToHoneycomb(env, root)
+    return new Response('Internal server error: ' + err.message, { status: 500 })
   }
 })
 
 // DELETE product
 router.delete('/products/:id', async (req, env) => {
   const traceId = newTraceId()
-  const logger = new Logger(env, traceId)
-  const span = makeSpan(traceId, 'DELETE /products/:id', { endpoint: '/products/:id' })
+  const root = makeSpan(traceId, 'DELETE /products/:id')
+  const start = Date.now()
 
   try {
     const id = Number(req.params.id)
-    const { results } = await env.mydb.prepare('SELECT * FROM products WHERE id = ?').bind(id).all()
-    if (!results || results.length === 0) {
-      await logger.debug('Product not found for delete', { id })
-	  span.attributes = span.attributes || {};
-      span.attributes.status = 'not_found'
-      await sendSpanToHoneycomb(env, span)
+
+    const product = await runWithSpan(env, traceId, 'db_fetch_before_delete', root.span_id, async () => {
+      const { results } = await env.mydb.prepare('SELECT * FROM products WHERE id = ?').bind(id).all()
+      return results[0]
+    })
+
+    if (!product) {
+      root.attributes.status = 'not_found'
+      await sendSpanToHoneycomb(env, root)
       return Response.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    await env.mydb.prepare('DELETE FROM products WHERE id = ?').bind(id).run()
-    await env.mylogs.put(`product-delete-${id}.json`, JSON.stringify(results[0], null, 2))
-    await logger.event('Product deleted', { id })
-	span.attributes = span.attributes || {};
-    span.attributes.status = 'success'
-    await sendSpanToHoneycomb(env, span)
-    return Response.json({ message: 'Product deleted', product: results[0] })
+    await runWithSpan(env, traceId, 'db_delete_product', root.span_id, async () => {
+      await env.mydb.prepare('DELETE FROM products WHERE id = ?').bind(id).run()
+    })
+
+    await runWithSpan(env, traceId, 'r2_write_delete_log', root.span_id, async () => {
+      await env.mylogs.put(`product-delete-${id}.json`, JSON.stringify(product, null, 2))
+    })
+
+    root.attributes.status = 'success'
+    root.attributes.duration_ms = Date.now() - start
+    await sendSpanToHoneycomb(env, root)
+    return Response.json({ message: 'Product deleted', product })
   } catch (err) {
-    await logger.error('Error deleting product', { error: err?.message })
-    span.attributes = span.attributes || {}
-    span.attributes.status = 'error'
-    span.attributes.error = err?.message
-    await sendSpanToHoneycomb(env, span)
-    return new Response('Internal server error: ' + (err?.message || err), { status: 500 })
+    root.attributes.status = 'error'
+    root.attributes.error = err.message
+    root.attributes.duration_ms = Date.now() - start
+    await sendSpanToHoneycomb(env, root)
+    return new Response('Internal server error: ' + err.message, { status: 500 })
   }
 })
 

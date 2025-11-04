@@ -23,6 +23,7 @@ export async function sendSpanToHoneycomb(env, span) {
       ...(span.parent_id ? { "trace.parent_id": span.parent_id } : {}),
       "name": span.name,
       ...span.attributes,
+      
     },
   };
 
